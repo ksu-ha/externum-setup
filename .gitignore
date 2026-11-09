@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Тесты
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Локальные артефакты
+*.log
+*.tar.gz
+externum_workspace/
+externum_report_*
+
+# usb-disk (не коммитим образы и пакеты)
+usb-disk/
+!usb-disk/config.yml
+!usb-disk/install.sh
+!usb-disk/under-install.sh
+!usb-disk/support_scripts/
+!usb-disk/ansible/
