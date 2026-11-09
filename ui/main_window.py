@@ -1,6 +1,7 @@
-
 import os
 import platform
+import shutil
+import tempfile
 import time
 from pathlib import Path
 
@@ -19,6 +20,10 @@ from core.network import validate_network_form, interfaces
 from core.executor import InstallWorker
 from core.iso import ISOManager, ISOError
 from core.progress import ProgressState
+from core.usbdisk import UsbDisk, UsbDiskError
+from core.config_gen import prepare_workspace, ConfigError
+from core.prp import configure_prp, PRPError
+from core.iso_repo import configure_iso_repo, ISORepoError
 from logging_setup.report import build_report
 from ui.circular_progress import CircularProgress
 
@@ -221,14 +226,15 @@ class CheckWorker(QThread):
     completed = pyqtSignal(object)
     failed = pyqtSignal(str)
 
-    def __init__(self, iso_path):
+    def __init__(self, iso_path, usb_disk=""):
         super().__init__()
         self.iso_path = iso_path
+        self.usb_disk = usb_disk
 
     def run(self):
         try:
             self.completed.emit(
-                run_preflight(self.iso_path)
+                run_preflight(self.iso_path, self.usb_disk)
             )
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -247,6 +253,8 @@ class MainWindow(QMainWindow):
         self.logger = logger
 
         self.iso_manager = ISOManager()
+        self.workspace = Path(tempfile.gettempdir()) / "externum_workspace"
+
         self.check_worker = None
         self.install_worker = None
 
@@ -468,9 +476,60 @@ class MainWindow(QMainWindow):
         ])
 
         layout.addWidget(self.topology_combo)
+
+        layout.addWidget(QLabel("КАТАЛОГ USB-DISK"))
+
+        usb_row = QHBoxLayout()
+
+        self.usb_input = QLineEdit()
+        self.usb_input.setPlaceholderText(
+            "Например: /home/forpost/usb-disk"
+        )
+        usb_row.addWidget(self.usb_input, 1)
+
+        usb_browse = QPushButton("ОБЗОР")
+        usb_browse.setObjectName("secondary")
+        usb_browse.clicked.connect(self.select_usb_disk)
+        usb_row.addWidget(usb_browse)
+
+        layout.addLayout(usb_row)
+
+        self.usb_status = QLabel("Каталог usb-disk не указан")
+        self.usb_status.setObjectName("checkDetail")
+        self.usb_status.setWordWrap(True)
+        layout.addWidget(self.usb_status)
+
         layout.addStretch()
 
         return page
+
+    def select_usb_disk(self):
+        path = QFileDialog.getExistingDirectory(
+            self,
+            "Выбрать каталог usb-disk",
+            self.usb_input.text().strip() or ""
+        )
+
+        if not path:
+            return
+
+        self.usb_input.setText(path)
+        self.validate_usb_disk(path)
+
+    def validate_usb_disk(self, path):
+        try:
+            info = UsbDisk(path).validate()
+            self.state.usb_disk = info["root"]
+            self.usb_status.setText(
+                "OK: install.sh, under-install.sh, "
+                "config.yml найдены в usb-disk"
+            )
+            self.logger.info(
+                f"usb-disk selected: {info['root']}"
+            )
+        except UsbDiskError as exc:
+            self.state.usb_disk = ""
+            self.usb_status.setText(str(exc))
 
     # --------------------------------------------------------
     # PAGE 2: CHECKS
@@ -483,7 +542,7 @@ class MainWindow(QMainWindow):
             layout,
             "PRE-FLIGHT / SYSTEM DIAGNOSTICS",
             "Готовность системы",
-            "Семь контрольных зон перед началом развёртывания."
+            "Контрольные зоны перед началом развёртывания."
         )
 
         top = QHBoxLayout()
@@ -584,6 +643,9 @@ class MainWindow(QMainWindow):
         if self.check_worker and self.check_worker.isRunning():
             return
 
+        if self.usb_input.text().strip():
+            self.validate_usb_disk(self.usb_input.text().strip())
+
         self.check_btn.setEnabled(False)
         self.check_btn.setText("ВЫПОЛНЯЕТСЯ...")
 
@@ -592,7 +654,10 @@ class MainWindow(QMainWindow):
             "Выполняется диагностика"
         )
 
-        self.check_worker = CheckWorker(self.state.iso_path)
+        self.check_worker = CheckWorker(
+            self.state.iso_path,
+            self.state.usb_disk
+        )
         self.check_worker.completed.connect(self.checks_finished)
         self.check_worker.failed.connect(self.checks_failed)
         self.check_worker.start()
@@ -673,6 +738,56 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.interface_combo)
 
+        # --- PRP card (появляется только при >= 2 интерфейсах) ---
+
+        self.prp_card = QFrame()
+        self.prp_card.setObjectName("prpCard")
+        prp_layout = QVBoxLayout(self.prp_card)
+        prp_layout.setContentsMargins(16, 14, 16, 14)
+        prp_layout.setSpacing(8)
+
+        prp_title = QLabel("PRP / ОТКАЗОУСТОЙЧИВЫЙ ИНТЕРФЕЙС")
+        prp_title.setObjectName("noticeTitle")
+
+        self.prp_hint = QLabel(
+            "Обнаружено несколько интерфейсов. "
+            "Рекомендуется выделить отдельный PRP-интерфейс "
+            "для стабильной работы системы."
+        )
+        self.prp_hint.setObjectName("subheading")
+        self.prp_hint.setWordWrap(True)
+
+        prp_row = QHBoxLayout()
+
+        self.prp_combo = QComboBox()
+        self.prp_combo.addItems(found or ["eth0"])
+        prp_row.addWidget(self.prp_combo, 1)
+
+        self.prp_enable_btn = QPushButton("ВКЛЮЧИТЬ PRP")
+        self.prp_enable_btn.setObjectName("secondary")
+        self.prp_enable_btn.clicked.connect(self.enable_prp)
+        prp_row.addWidget(self.prp_enable_btn)
+
+        self.prp_skip_btn = QPushButton("БЕЗ PRP")
+        self.prp_skip_btn.setObjectName("secondary")
+        self.prp_skip_btn.clicked.connect(self.skip_prp)
+        prp_row.addWidget(self.prp_skip_btn)
+
+        prp_layout.addWidget(prp_title)
+        prp_layout.addWidget(self.prp_hint)
+        prp_layout.addLayout(prp_row)
+
+        self.prp_status = QLabel("PRP не настроен")
+        self.prp_status.setObjectName("checkDetail")
+        self.prp_status.setWordWrap(True)
+        prp_layout.addWidget(self.prp_status)
+
+        layout.addWidget(self.prp_card)
+
+        self.prp_card.setVisible(len(found) >= 2)
+
+        # --- Основные поля ---
+
         fields = [
             ("IP-АДРЕС", "ip", "Например: 192.168.1.10"),
             ("МАСКА CIDR", "cidr", "Например: 24"),
@@ -699,6 +814,62 @@ class MainWindow(QMainWindow):
         layout.addStretch()
 
         return page
+
+    def enable_prp(self):
+        if not self.state.usb_disk:
+            self.notify(
+                "usb-disk не выбран",
+                "Укажите каталог usb-disk на первом экране.",
+                "warning"
+            )
+            return
+
+        iface = self.prp_combo.currentText()
+        ip = self.network_inputs["ip"].text().strip()
+
+        if platform.system() != "Linux":
+            self.state.prp_enabled = True
+            self.state.prp_interface = iface
+            self.prp_status.setText(
+                f"Демо-режим: PRP отмечен на {iface} "
+                f"({ip or 'без IP'})"
+            )
+            self.logger.info(f"PRP enabled (demo) on {iface}")
+            return
+
+        if not ip:
+            self.notify(
+                "IP не задан",
+                "Сначала укажите IP-адрес для PRP.",
+                "warning"
+            )
+            return
+
+        try:
+            output = configure_prp(
+                self.state.usb_disk,
+                iface,
+                ip
+            )
+            self.state.prp_enabled = True
+            self.state.prp_interface = iface
+            self.prp_status.setText(
+                f"PRP настроен на {iface}: "
+                f"{output[-200:] or 'OK'}"
+            )
+            self.logger.info(f"PRP configured on {iface}")
+
+        except PRPError as exc:
+            self.logger.error(str(exc))
+            self.notify("Ошибка PRP", str(exc), "error")
+
+    def skip_prp(self):
+        self.state.prp_enabled = False
+        self.state.prp_interface = ""
+        self.prp_status.setText(
+            "Продолжаем без PRP (рекомендуется настроить)"
+        )
+        self.logger.info("PRP skipped by user")
 
     # --------------------------------------------------------
     # PAGE 4: ISO
@@ -748,6 +919,18 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.mount_button)
         layout.addWidget(self.unmount_button)
+
+        self.iso_repo_button = QPushButton(
+            "ПОДКЛЮЧИТЬ ISO КАК РЕПОЗИТОРИЙ"
+        )
+        self.iso_repo_button.setObjectName("secondary")
+        self.iso_repo_button.clicked.connect(self.setup_iso_repo)
+        layout.addWidget(self.iso_repo_button)
+
+        self.iso_repo_status = QLabel("")
+        self.iso_repo_status.setObjectName("checkDetail")
+        self.iso_repo_status.setWordWrap(True)
+        layout.addWidget(self.iso_repo_status)
 
         layout.addStretch()
 
@@ -819,11 +1002,58 @@ class MainWindow(QMainWindow):
             self.iso_manager.unmount()
 
             self.iso_info.setText("ISO размонтирован.")
+            self.state.iso_repo_ready = False
+            self.iso_repo_status.setText("")
             self.logger.info("ISO unmounted")
 
         except ISOError as exc:
             self.notify(
                 "Ошибка размонтирования",
+                str(exc),
+                "error"
+            )
+
+    def setup_iso_repo(self):
+        if not self.state.iso_path:
+            self.notify(
+                "Источник не выбран",
+                "Сначала выберите ISO-файл.",
+                "warning"
+            )
+            return
+
+        if not self.state.usb_disk:
+            self.notify(
+                "usb-disk не выбран",
+                "Укажите каталог usb-disk на первом экране.",
+                "warning"
+            )
+            return
+
+        if platform.system() != "Linux":
+            self.state.iso_repo_ready = True
+            self.iso_repo_status.setText(
+                "Демо-режим: ISO-репозиторий отмечен как подключённый"
+            )
+            self.logger.info("ISO repo enabled (demo)")
+            return
+
+        try:
+            output = configure_iso_repo(
+                self.state.usb_disk,
+                self.state.iso_path
+            )
+            self.state.iso_repo_ready = True
+            self.iso_repo_status.setText(
+                f"ISO подключён как репозиторий: "
+                f"{output[-200:] or 'OK'}"
+            )
+            self.logger.info("ISO repo configured")
+
+        except ISORepoError as exc:
+            self.logger.error(str(exc))
+            self.notify(
+                "Ошибка ISO-репозитория",
                 str(exc),
                 "error"
             )
@@ -1005,6 +1235,11 @@ class MainWindow(QMainWindow):
 
     def update_review(self):
         self.state.mode = self.topology_combo.currentText()
+        self.state.system_type = (
+            "centralized"
+            if self.state.mode == "Единая"
+            else "distributed"
+        )
         self.state.run_mode = self.mode_combo.currentText()
 
         network = {
@@ -1015,15 +1250,30 @@ class MainWindow(QMainWindow):
         network["interface"] = self.interface_combo.currentText()
         self.state.network = network
 
+        prp_line = (
+            f"включён на {self.state.prp_interface}"
+            if self.state.prp_enabled
+            else "выключен"
+        )
+
         self.review_text.setText(
             f"Режим: {self.state.run_mode}\n\n"
-            f"Топология: {self.state.mode}\n\n"
+            f"Топология: {self.state.mode} "
+            f"({self.state.system_type})\n\n"
             f"Интерфейс: {network['interface']}\n"
             f"IP: {network['ip'] or 'Не задан'}\n"
             f"CIDR: {network['cidr'] or 'Не задан'}\n"
             f"Шлюз: {network['gateway'] or 'Не задан'}\n"
             f"DNS: {network['dns'] or 'Не задан'}\n\n"
-            f"ISO: {self.state.iso_path or 'Не выбран'}"
+            f"PRP: {prp_line}\n"
+            f"ISO: {self.state.iso_path or 'Не выбран'}\n"
+            f"ISO-репозиторий: "
+            f"{'готов' if self.state.iso_repo_ready else 'не готов'}\n"
+            f"usb-disk: {self.state.usb_disk or 'Не выбран'}\n"
+            f"config.yml: "
+            f"{'сгенерирован' if self.state.config_yml else 'нет'}\n"
+            f"inventory.yml: "
+            f"{'сгенерирован' if self.state.inventory_yml else 'нет'}"
         )
 
     def go_back(self):
@@ -1051,6 +1301,11 @@ class MainWindow(QMainWindow):
 
         self.state.run_mode = self.mode_combo.currentText()
         self.state.mode = self.topology_combo.currentText()
+        self.state.system_type = (
+            "centralized"
+            if self.state.mode == "Единая"
+            else "distributed"
+        )
 
         # Диагностика должна быть запущена.
         if page == 1:
@@ -1097,13 +1352,21 @@ class MainWindow(QMainWindow):
             else:
                 self.network_error.clear()
 
-        # Проверка ISO для реальной установки.
+        # Проверка ISO и usb-disk для реальной установки.
         if page == 3:
             if self.state.run_mode == "Реальная установка":
                 if platform.system() != "Linux":
                     self.notify(
                         "Недоступный режим",
                         "Реальная установка доступна только в Linux.",
+                        "warning"
+                    )
+                    return
+
+                if not self.state.usb_disk:
+                    self.notify(
+                        "usb-disk не выбран",
+                        "Вернитесь на первый экран и укажите usb-disk.",
                         "warning"
                     )
                     return
@@ -1116,13 +1379,35 @@ class MainWindow(QMainWindow):
                     )
                     return
 
-        # Подтверждение запуска.
+        # Подготовка config.yml и inventory.yml + подтверждение.
         if page == 4:
+            if self.state.usb_disk:
+                try:
+                    paths = prepare_workspace(
+                        self.state,
+                        self.state.usb_disk,
+                        self.workspace
+                    )
+                    self.state.inventory_yml = paths["inventory"]
+                    self.state.config_yml = paths["config"]
+                    self.logger.info(
+                        "inventory.yml and config.yml prepared"
+                    )
+                except ConfigError as exc:
+                    self.logger.error(str(exc))
+                    self.notify(
+                        "Ошибка подготовки конфигурации",
+                        str(exc),
+                        "error"
+                    )
+                    return
+
             accepted = self.confirm(
                 "Запустить операцию?",
                 "Будет запущен процесс развёртывания Externum "
                 "с выбранными параметрами конфигурации.\n\n"
-                "Перед продолжением убедитесь, что параметры указаны верно.",
+                "Перед продолжением убедитесь, что параметры "
+                "указаны верно.",
                 "ДА, ЗАПУСТИТЬ"
             )
 
@@ -1136,7 +1421,6 @@ class MainWindow(QMainWindow):
             self.start_install()
             return
 
-        # ВАЖНО: обычный переход для экранов 1–4.
         self.show_page(page + 1)
 
     # --------------------------------------------------------
@@ -1155,16 +1439,24 @@ class MainWindow(QMainWindow):
             or platform.system() == "Windows"
         )
 
+        if self.state.usb_disk:
+            default_script = (
+                Path(self.state.usb_disk) / "install.sh"
+            )
+        else:
+            default_script = Path.cwd() / "install.sh"
+
         script_path = os.environ.get(
             "EXTERNUM_INSTALL_SCRIPT",
-            str(Path.cwd() / "install.sh")
+            str(default_script)
         )
 
         if not demo and not Path(script_path).is_file():
             self.notify(
                 "Установщик не найден",
                 "Не найден install.sh. "
-                "Укажите путь через EXTERNUM_INSTALL_SCRIPT.",
+                "Укажите путь через EXTERNUM_INSTALL_SCRIPT "
+                "или выберите usb-disk на первом экране.",
                 "error"
             )
             self.show_page(4)
@@ -1192,9 +1484,21 @@ class MainWindow(QMainWindow):
         self.retry_button.setEnabled(True)
         self.cancel_button.setEnabled(True)
 
+        env_extra = {
+            "EXTERNUM_NONINTERACTIVE": "1",
+            "EXTERNUM_INVENTORY": self.state.inventory_yml or "",
+            "EXTERNUM_CONFIG": self.state.config_yml or "",
+            "EXTERNUM_SYSTEM_TYPE": self.state.system_type,
+            "EXTERNUM_PRP": "1" if self.state.prp_enabled else "0",
+            "EXTERNUM_ISO_REPO": (
+                "1" if self.state.iso_repo_ready else "0"
+            ),
+        }
+
         self.install_worker = InstallWorker(
             demo=demo,
-            script_path=script_path
+            script_path=script_path,
+            env_extra=env_extra
         )
 
         self.install_worker.output.connect(self.append_log)
@@ -1367,5 +1671,10 @@ class MainWindow(QMainWindow):
             self.iso_manager.close()
         except Exception as exc:
             self.logger.error(str(exc))
+
+        try:
+            shutil.rmtree(self.workspace, ignore_errors=True)
+        except Exception:
+            pass
 
         event.accept()

@@ -7,6 +7,9 @@ from pathlib import Path
 
 from .network import interfaces, get_network_snapshot, tcp_probe
 
+from .usbdisk import UsbDisk, UsbDiskError
+
+
 
 def make_result(name, ok, detail, required=True, warning=False):
     return {
@@ -280,7 +283,7 @@ def check_iso(iso_path):
         )
 
 
-def run_preflight(iso_path=""):
+def run_preflight(iso_path="", usb_disk_path=""):
     results = [
         check_os(),
         check_architecture(),
@@ -288,9 +291,9 @@ def run_preflight(iso_path=""):
         check_network(),
         check_apt(),
         check_resources(),
-        check_iso(iso_path)
+        check_iso(iso_path),
+        check_usb_disk(usb_disk_path),
     ]
-
     return results
 
 
@@ -328,3 +331,34 @@ def readiness_summary(results):
         ]
     }
 
+def check_usb_disk(usb_disk_path):
+    if platform.system() == "Windows":
+        return make_result(
+            "Установочный пакет (usb-disk)",
+            True,
+            "Windows Preview: проверка usb-disk пропущена",
+            required=False,
+            warning=True,
+        )
+
+    if not usb_disk_path:
+        return make_result(
+            "Установочный пакет (usb-disk)",
+            False,
+            "Каталог usb-disk не выбран",
+        )
+
+    try:
+        info = UsbDisk(usb_disk_path).validate()
+    except UsbDiskError as exc:
+        return make_result(
+            "Установочный пакет (usb-disk)",
+            False,
+            str(exc),
+        )
+
+    return make_result(
+        "Установочный пакет (usb-disk)",
+        True,
+        f"Найден install.sh, under-install.sh, config.yml в {info['root']}",
+    )

@@ -20,12 +20,15 @@ class InstallWorker(QThread):
         self,
         demo=False,
         script_path=None,
-        parent=None
+        env_extra=None,
+        parent=None,
     ):
         super().__init__(parent)
 
         self.demo = demo
         self.script_path = script_path
+        self.env_extra = dict(env_extra or {})
+
         self._cancel_requested = False
         self.process = None
         self.started_at = None
@@ -137,7 +140,8 @@ class InstallWorker(QThread):
                 bufsize=1,
                 env={
                     **os.environ,
-                    "TERM": "dumb"
+                    **self.env_extra,
+                    "TERM": "dumb",
                 }
             )
 
