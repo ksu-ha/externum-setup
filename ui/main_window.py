@@ -538,7 +538,7 @@ class MainWindow(QMainWindow):
             layout,
             "PRE-FLIGHT / SYSTEM DIAGNOSTICS",
             "Готовность системы",
-            "Восемь контрольных зон перед началом развёртывания."
+            "Девять контрольных зон перед началом развёртывания."
         )
 
         top = QHBoxLayout()
@@ -815,6 +815,21 @@ class MainWindow(QMainWindow):
         add_field(2, 1, "МАСКА CIDR", "cidr", "Например: 24")
         add_field(3, 0, "ШЛЮЗ", "gateway", "Например: 192.168.1.1")
         add_field(3, 1, "DNS", "dns", "Например: 8.8.8.8")
+
+        # SSH-поля
+        add_field(4, 0, "SSH-ЛОГИН", "ssh_user", "Например: admin")
+        add_field(4, 1, "SSH-ПАРОЛЬ", "ssh_password", "Пароль")
+
+        # Скрываем пароль
+        self.network_inputs["ssh_password"].setEchoMode(
+            QLineEdit.Password
+        )
+
+        # NTP и сервер истории
+        add_field(5, 0, "NTP-СЕРВЕР (опционально)", "ntp_server",
+                  "Например: 10.0.0.20")
+        add_field(5, 1, "СЕРВЕР ИСТОРИИ (для распределённой)",
+                  "history_server", "Например: 10.0.0.11")
 
         layout.addLayout(grid)
         layout.addStretch()
@@ -1293,6 +1308,12 @@ class MainWindow(QMainWindow):
             f"CIDR: {network['cidr'] or 'Не задан'}\n"
             f"Шлюз: {network['gateway'] or 'Не задан'}\n"
             f"DNS: {network['dns'] or 'Не задан'}\n\n"
+            f"SSH-логин: {network.get('ssh_user') or 'Не задан'}\n"
+            f"SSH-пароль: "
+            f"{'***' if network.get('ssh_password') else 'Не задан'}\n"
+            f"NTP: {network.get('ntp_server') or 'Не задан'}\n"
+            f"Сервер истории: "
+            f"{network.get('history_server') or 'Не задан'}\n\n"
             f"PRP: {prp_line}\n"
             f"ISO: {self.state.iso_path or 'Не выбран'}\n"
             f"ISO-репозиторий: "
@@ -1349,6 +1370,18 @@ class MainWindow(QMainWindow):
             data["interface"] = self.interface_combo.currentText()
 
             errors = validate_network_form(data)
+
+            # В реальном режиме SSH обязателен
+            if self.state.run_mode == "Реальная установка":
+                if not data.get("ssh_user"):
+                    errors["ssh_user"] = "Укажите SSH-логин"
+                if not data.get("ssh_password"):
+                    errors["ssh_password"] = "Укажите SSH-пароль"
+                if self.state.system_type == "distributed":
+                    if not data.get("history_server"):
+                        errors["history_server"] = (
+                            "Укажите IP сервера истории"
+                        )
 
             for err_label in self.network_errors.values():
                 err_label.hide()
@@ -1505,15 +1538,17 @@ class MainWindow(QMainWindow):
         self.retry_button.setEnabled(True)
         self.cancel_button.setEnabled(True)
 
+        net = self.state.network or {}
+
         env_extra = {
-            "EXTERNUM_NONINTERACTIVE": "1",
-            "EXTERNUM_INVENTORY": self.state.inventory_yml or "",
-            "EXTERNUM_CONFIG": self.state.config_yml or "",
-            "EXTERNUM_SYSTEM_TYPE": self.state.system_type,
-            "EXTERNUM_PRP": "1" if self.state.prp_enabled else "0",
-            "EXTERNUM_ISO_REPO": (
-                "1" if self.state.iso_repo_ready else "0"
-            ),
+            "system_type": self.state.system_type,
+            "project_server": net.get("ip", ""),
+            "history_server": net.get("history_server", ""),
+            "ssh_user": net.get("ssh_user", ""),
+            "ssh_password": net.get("ssh_password", ""),
+            "ntp_server": net.get("ntp_server", ""),
+            "apt_server": net.get("ip", ""),
+            "apt_iso": self.state.iso_path or "",
         }
 
         self.install_worker = InstallWorker(
@@ -1629,10 +1664,17 @@ class MainWindow(QMainWindow):
     # --------------------------------------------------------
 
     def export_report(self):
+        output_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Выберите папку для сохранения отчёта",
+            str(Path.home())
+        )
+
         try:
             path = build_report(
                 self.state,
-                self.logger
+                self.logger,
+                output_dir if output_dir else None
             )
 
             self.report_path_label.setText(

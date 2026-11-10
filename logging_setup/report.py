@@ -31,22 +31,21 @@ def _collect_diagnostics():
     }
 
 
-def build_report(state, logger, output_path=None):
-    if output_path is None:
+def build_report(state, logger, output_dir=None):
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    filename = f"externum-install-error-{timestamp}.tar.gz"
+
+    if output_dir:
+        output_path = Path(output_dir) / filename
+    else:
         directory = Path(logger.get_directory())
         directory.mkdir(parents=True, exist_ok=True)
-
-        timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        output_path = directory / f"externum-install-error-{timestamp}.tar.gz"
-
-    output_path = Path(output_path)
+        output_path = directory / filename
 
     snapshot = state.public_snapshot()
-
     snapshot["generated_at"] = datetime.now().isoformat()
     snapshot["platform"] = platform.platform()
     snapshot["python"] = platform.python_version()
-
     snapshot = safe_dict(snapshot)
 
     with tempfile.TemporaryDirectory(prefix="externum_report_") as temp:

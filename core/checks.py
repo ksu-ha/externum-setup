@@ -1,4 +1,3 @@
-
 import os
 import platform
 import shutil
@@ -6,9 +5,7 @@ import subprocess
 from pathlib import Path
 
 from .network import interfaces, get_network_snapshot, tcp_probe
-
 from .usbdisk import UsbDisk, UsbDiskError
-
 
 
 def make_result(name, ok, detail, required=True, warning=False):
@@ -50,38 +47,24 @@ def check_os():
         )
 
     path = Path("/etc/os-release")
-
     if not path.exists():
-        return make_result(
-            "Операционная система",
-            False,
-            "Не найден /etc/os-release"
-        )
+        return make_result("Операционная система", False, "Не найден /etc/os-release")
 
     try:
-        content = path.read_text(
-            encoding="utf-8",
-            errors="replace"
-        ).lower()
-
+        content = path.read_text(encoding="utf-8", errors="replace").lower()
         is_astra = "astra" in content or "orel" in content
-
         return make_result(
             "Операционная система",
             is_astra,
-            "Astra Linux обнаружена" if is_astra
-            else "Обнаружена неподдерживаемая ОС"
+            "Astra Linux обнаружена" if is_astra else "Обнаружена неподдерживаемая ОС"
         )
-
     except OSError as exc:
         return make_result("Операционная система", False, exc)
 
 
 def check_architecture():
     arch = platform.machine().lower()
-
     supported = arch in ("x86_64", "amd64", "aarch64")
-
     return make_result(
         "Архитектура процессора",
         supported,
@@ -106,7 +89,6 @@ def check_interfaces():
         for line in snapshot["addresses"].splitlines()
         if "127." not in line
     )
-
     return make_result(
         "Сетевые интерфейсы",
         bool(found) and has_ipv4,
@@ -125,11 +107,7 @@ def check_network():
             warning=True
         )
 
-    online = (
-        tcp_probe("1.1.1.1", 443) or
-        tcp_probe("8.8.8.8", 443)
-    )
-
+    online = tcp_probe("1.1.1.1", 443) or tcp_probe("8.8.8.8", 443)
     return make_result(
         "Доступность сети",
         online,
@@ -153,17 +131,13 @@ def check_apt():
     apt = shutil.which("apt-get")
     sources = Path("/etc/apt/sources.list")
     sources_dir = Path("/etc/apt/sources.list.d")
-
     found = False
 
     if sources.is_file():
         try:
             found = any(
                 line.strip() and not line.lstrip().startswith("#")
-                for line in sources.read_text(
-                    encoding="utf-8",
-                    errors="replace"
-                ).splitlines()
+                for line in sources.read_text(encoding="utf-8", errors="replace").splitlines()
             )
         except OSError:
             pass
@@ -172,18 +146,13 @@ def check_apt():
         for path in sources_dir.glob("*"):
             if path.suffix not in (".list", ".sources"):
                 continue
-
             try:
-                if path.read_text(
-                    encoding="utf-8",
-                    errors="replace"
-                ).strip():
+                if path.read_text(encoding="utf-8", errors="replace").strip():
                     found = True
             except OSError:
                 pass
 
     ok = bool(apt and found)
-
     return make_result(
         "APT и репозитории",
         ok,
@@ -208,7 +177,6 @@ def check_resources():
         disk = 0
 
     memory = 0
-
     try:
         for line in Path("/proc/meminfo").read_text().splitlines():
             if line.startswith("MemTotal:"):
@@ -217,13 +185,57 @@ def check_resources():
     except (OSError, ValueError):
         pass
 
-    ok = disk >= 10 and memory >= 2048
+    # Требования Externum по официальной инструкции: 32 ГБ RAM, 100 ГБ диска
+    ok = disk >= 32 and memory >= 32768
 
     return make_result(
         "Системные ресурсы",
         ok,
         f"Свободно {disk:.1f} ГБ; RAM {memory:.0f} МБ. "
-        "Рекомендуемый минимум: 10 ГБ и 2 ГБ RAM."
+        "Требуется: 32 ГБ диска и 32 ГБ RAM.",
+        required=False,
+        warning=not ok,
+    )
+
+
+def check_docker():
+    if platform.system() == "Windows":
+        return make_result(
+            "Docker и Docker Compose",
+            True,
+            "Windows Preview: проверка Docker пропущена",
+            required=False,
+            warning=True,
+        )
+
+    docker = shutil.which("docker")
+    if not docker:
+        return make_result(
+            "Docker и Docker Compose",
+            False,
+            "Docker не установлен (требуется 25.0.5.astra2)",
+            required=False,
+            warning=True,
+        )
+
+    try:
+        version = subprocess.check_output(
+            ["docker", "--version"],
+            text=True,
+            timeout=5,
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        version = "docker (версия неизвестна)"
+
+    compose = shutil.which("docker-compose")
+    compose_ok = compose is not None
+
+    return make_result(
+        "Docker и Docker Compose",
+        compose_ok,
+        f"{version}; docker-compose: {'найден' if compose_ok else 'не найден'}",
+        required=False,
+        warning=not compose_ok,
     )
 
 
@@ -238,7 +250,6 @@ def check_iso(iso_path):
         )
 
     path = Path(iso_path)
-
     if not path.is_file():
         return make_result(
             "Источник пакетов / ISO",
@@ -263,7 +274,6 @@ def check_iso(iso_path):
             signature = file.read(5)
 
         valid = signature == b"CD001"
-
         return make_result(
             "Источник пакетов / ISO",
             valid,
@@ -272,7 +282,6 @@ def check_iso(iso_path):
             required=False,
             warning=not valid
         )
-
     except OSError as exc:
         return make_result(
             "Источник пакетов / ISO",
@@ -282,54 +291,6 @@ def check_iso(iso_path):
             warning=True
         )
 
-
-def run_preflight(iso_path="", usb_disk_path=""):
-    results = [
-        check_os(),
-        check_architecture(),
-        check_interfaces(),
-        check_network(),
-        check_apt(),
-        check_resources(),
-        check_iso(iso_path),
-        check_usb_disk(usb_disk_path),
-    ]
-    return results
-
-
-
-def readiness_summary(results):
-    total = len(results)
-
-    passed = sum(
-        1 for item in results
-        if item["ok"]
-    )
-
-    required = [
-        item for item in results
-        if item["required"]
-    ]
-
-    ready = all(
-        item["ok"]
-        for item in required
-    )
-
-    return {
-        "passed": passed,
-        "total": total,
-        "percent": round(passed / total * 100) if total else 0,
-        "ready": ready,
-        "warnings": [
-            item for item in results
-            if item["warning"]
-        ],
-        "errors": [
-            item for item in results
-            if not item["ok"] and item["required"]
-        ]
-    }
 
 def check_usb_disk(usb_disk_path):
     if platform.system() == "Windows":
@@ -351,14 +312,41 @@ def check_usb_disk(usb_disk_path):
     try:
         info = UsbDisk(usb_disk_path).validate()
     except UsbDiskError as exc:
-        return make_result(
-            "Установочный пакет (usb-disk)",
-            False,
-            str(exc),
-        )
+        return make_result("Установочный пакет (usb-disk)", False, str(exc))
 
     return make_result(
         "Установочный пакет (usb-disk)",
         True,
         f"Найден install.sh, under-install.sh, config.yml в {info['root']}",
     )
+
+
+def run_preflight(iso_path="", usb_disk_path=""):
+    results = [
+        check_os(),
+        check_architecture(),
+        check_interfaces(),
+        check_network(),
+        check_apt(),
+        check_resources(),
+        check_iso(iso_path),
+        check_usb_disk(usb_disk_path),
+        check_docker(),
+    ]
+    return results
+
+
+def readiness_summary(results):
+    total = len(results)
+    passed = sum(1 for item in results if item["ok"])
+    required = [item for item in results if item["required"]]
+    ready = all(item["ok"] for item in required)
+
+    return {
+        "passed": passed,
+        "total": total,
+        "percent": round(passed / total * 100) if total else 0,
+        "ready": ready,
+        "warnings": [item for item in results if item["warning"]],
+        "errors": [item for item in results if not item["ok"] and item["required"]]
+    }

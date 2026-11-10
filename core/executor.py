@@ -120,17 +120,64 @@ class InstallWorker(QThread):
                 False,
                 -1,
                 "Для реального запуска откройте приложение "
-                "с необходимыми административными правами"
+                "с правами root (sudo)"
             )
             return
 
+        # Собираем аргументы для CLI-режима оригинального install.sh
+        args = [
+            "/bin/bash", str(script),
+            "--mode", "cli",
+        ]
+
+        system_type = self.env_extra.get("system_type", "centralized")
+        args.extend(["--system-type", system_type])
+
+        project_server = self.env_extra.get("project_server", "")
+        if project_server:
+            args.extend(["--project-server", project_server])
+
+        history_server = self.env_extra.get("history_server", "")
+        if history_server:
+            args.extend(["--history-server", history_server])
+
+        ssh_user = self.env_extra.get("ssh_user", "")
+        if ssh_user:
+            args.extend(["--user", ssh_user])
+
+        ssh_password = self.env_extra.get("ssh_password", "")
+        if ssh_password:
+            args.extend(["--password", ssh_password])
+
+        ntp_server = self.env_extra.get("ntp_server", "")
+        if ntp_server:
+            args.extend(["--ntp-server", ntp_server])
+
+        apt_server = self.env_extra.get("apt_server", "")
+        if apt_server:
+            args.extend(["--apt-server", apt_server])
+
+        apt_iso = self.env_extra.get("apt_iso", "")
+        if apt_iso:
+            args.extend(["--apt-iso", apt_iso])
+
         self.emit_output(
-            f"[INFO] Запуск сценария: {script.name}"
+            f"[INFO] Запуск: {script.name} --mode cli "
+            f"--system-type {system_type}"
         )
 
         try:
+            # Выводим аргументы в лог (без пароля!)
+            safe_args = [
+                a if a != ssh_password else "[REDACTED]"
+                for a in args
+            ]
+            self.emit_output(
+                f"[INFO] Аргументы: {' '.join(safe_args[2:])}"
+            )
+
             self.process = subprocess.Popen(
-                ["/bin/bash", str(script)],
+                args,
                 cwd=str(script.parent),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -140,8 +187,8 @@ class InstallWorker(QThread):
                 bufsize=1,
                 env={
                     **os.environ,
-                    **self.env_extra,
                     "TERM": "dumb",
+                    "LC_ALL": "C.UTF-8",
                 }
             )
 
@@ -154,7 +201,6 @@ class InstallWorker(QThread):
 
                 if line:
                     self.emit_output(line.rstrip())
-
                     self.progress.emit({
                         "operation": line.strip()[:160],
                         "percent": None
@@ -162,11 +208,9 @@ class InstallWorker(QThread):
 
                 if self.process.poll() is not None:
                     remaining = self.process.stdout.read()
-
                     if remaining:
                         for item in remaining.splitlines():
                             self.emit_output(item)
-
                     break
 
             return_code = self.process.wait()
