@@ -12,8 +12,7 @@ def _run(cmd, timeout=10):
     import subprocess
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True,
-            timeout=timeout, check=False,
+            cmd, capture_output=True, text=True, timeout=timeout, check=False,
         )
         return (result.stdout or "") + (result.stderr or "")
     except Exception:
@@ -46,22 +45,29 @@ def build_report(state, logger, output_dir=None):
     snapshot["generated_at"] = datetime.now().isoformat()
     snapshot["platform"] = platform.platform()
     snapshot["python"] = platform.python_version()
+    
+    # Добавляем последние логи как "Ansible-вывод"
+    log_path = Path(logger.get_path())
+    recent_logs = ""
+    if log_path.is_file():
+        try:
+            with open(log_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                recent_logs = "".join(lines[-100:])
+        except OSError:
+            pass
+
+    snapshot["last_logs"] = recent_logs
     snapshot = safe_dict(snapshot)
 
     with tempfile.TemporaryDirectory(prefix="externum_report_") as temp:
         temp_path = Path(temp)
 
         report_file = temp_path / "report.json"
-        report_file.write_text(
-            json.dumps(snapshot, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        report_file.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
 
         diagnostics_file = temp_path / "diagnostics.json"
-        diagnostics_file.write_text(
-            json.dumps(_collect_diagnostics(), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        diagnostics_file.write_text(json.dumps(_collect_diagnostics(), ensure_ascii=False, indent=2), encoding="utf-8")
 
         summary = temp_path / "README.txt"
         summary.write_text(
@@ -75,7 +81,13 @@ def build_report(state, logger, output_dir=None):
             f"Elapsed: {snapshot['progress']['elapsed_seconds']} sec\n"
             f"Error: {snapshot.get('last_error', '')}\n\n"
             "Secrets are redacted. config.yml is NOT included "
-            "to avoid leaking credentials.\n",
+            "to avoid leaking credentials.\n\n"
+            "RECOMMENDATIONS:\n"
+            "1. Check SSH access to project server (ping, ssh).\n"
+            "2. Verify ISO file is Astra Linux (not just any ISO).\n"
+            "3. Check Docker and Docker Compose versions.\n"
+            "4. Check available disk space and RAM (min 32GB RAM, 100GB disk).\n"
+            "5. Review last_logs section in report.json for Ansible output.\n",
             encoding="utf-8",
         )
 
@@ -84,7 +96,6 @@ def build_report(state, logger, output_dir=None):
             archive.add(diagnostics_file, arcname="diagnostics.json")
             archive.add(summary, arcname="README.txt")
 
-            log_path = Path(logger.get_path())
             if log_path.is_file():
                 archive.add(log_path, arcname="logs/externum.log")
 

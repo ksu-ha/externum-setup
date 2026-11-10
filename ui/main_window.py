@@ -834,7 +834,11 @@ class MainWindow(QMainWindow):
         layout.addLayout(grid)
         layout.addStretch()
 
-        return page
+        # Оборачиваем в скролл, чтобы поля не наезжали друг на друга
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(page)
+        return scroll
 
     def clear_field_error(self, key):
         if hasattr(self, "network_errors") and key in self.network_errors:
@@ -1362,6 +1366,7 @@ class MainWindow(QMainWindow):
                 return
 
         # Валидация сети (работает и в демо)
+        # Валидация сети (работает и в демо)
         if page == 2:
             data = {
                 key: field.text().strip()
@@ -1371,7 +1376,7 @@ class MainWindow(QMainWindow):
 
             errors = validate_network_form(data)
 
-            # В реальном режиме SSH обязателен
+            # В реальном режиме SSH обязателен и проверяем интерфейс
             if self.state.run_mode == "Реальная установка":
                 if not data.get("ssh_user"):
                     errors["ssh_user"] = "Укажите SSH-логин"
@@ -1379,9 +1384,17 @@ class MainWindow(QMainWindow):
                     errors["ssh_password"] = "Укажите SSH-пароль"
                 if self.state.system_type == "distributed":
                     if not data.get("history_server"):
-                        errors["history_server"] = (
-                            "Укажите IP сервера истории"
-                        )
+                        errors["history_server"] = "Укажите IP сервера истории"
+                    else:
+                        # Валидируем history_server как IP
+                        ok, msg = validate_ipv4(data["history_server"])
+                        if not ok:
+                            errors["history_server"] = f"Сервер истории: {msg}"
+                
+                # Проверка существования интерфейса
+                from core.network import check_interface_exists
+                if not check_interface_exists(data["interface"]):
+                    errors["interface"] = "Интерфейс не найден в системе"
 
             for err_label in self.network_errors.values():
                 err_label.hide()
@@ -1393,18 +1406,10 @@ class MainWindow(QMainWindow):
                         self.network_errors[key].show()
                 
                 if self.state.run_mode == "Реальная установка":
-                    self.notify(
-                        "Проверьте сеть",
-                        "Исправьте ошибки в полях перед продолжением.",
-                        "warning"
-                    )
+                    self.notify("Проверьте сеть", "Исправьте ошибки в полях перед продолжением.", "warning")
                     return
                 else:
-                    self.notify(
-                        "Демо-режим",
-                        "Поля содержат ошибки, но переход разрешён.",
-                        "warning"
-                    )
+                    self.notify("Демо-режим", "Поля содержат ошибки, но переход разрешён.", "warning")
 
             self.state.network = data
 
@@ -1563,6 +1568,9 @@ class MainWindow(QMainWindow):
             self.install_finished
         )
 
+        self.back_btn.setEnabled(False)
+        self.restart_btn.hide()
+
         self.install_worker.start()
         self.timer.start(1000)
 
@@ -1652,6 +1660,7 @@ class MainWindow(QMainWindow):
         )
 
         self.show_page(6)
+        self.back_btn.setEnabled(True)
 
     def retry_install(self):
         self.worker_success = False
