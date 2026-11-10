@@ -1,4 +1,2 @@
-PyQt5==5.15.11
-pyinstaller==6.19.0
 PyYAML==6.0.2
-pytest==8.3.4
+pyinstaller==6.19.0

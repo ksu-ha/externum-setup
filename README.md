@@ -51,6 +51,8 @@ sudo apt install -y python3-pip python3-venv \
 
 ### 2. Создание виртуального окружения и установка Python-библиотек
 
+Так как в Astra Linux уже есть системный PyQt5, мы создаем окружение, которое видит системные пакеты. Это предотвращает конфликт библиотек.
+
 ```bash
 cd externum-setup-main
 python3 -m venv --system-site-packages .venv
