@@ -11,7 +11,7 @@ class CircularProgress(QWidget):
 
         self._value = 0
         self.completed = 0
-        self.total = 9
+        self.total = 8
 
         self.animation = QPropertyAnimation(self, b"value", self)
         self.animation.setDuration(700)

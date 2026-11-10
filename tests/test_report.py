@@ -1,4 +1,3 @@
-
 import json
 import tarfile
 
@@ -27,10 +26,14 @@ def test_report_creation(tmp_path):
     state.progress.start("Test")
     state.progress.complete()
 
+    # Создаем директорию, куда сохранится отчет
+    output_dir = tmp_path / "reports"
+    output_dir.mkdir()
+
     archive_path = build_report(
         state,
         logger,
-        tmp_path / "report.tar.gz"
+        output_dir # <--- Передаем папку, а не путь к файлу
     )
 
     assert archive_path.endswith(".tar.gz")
