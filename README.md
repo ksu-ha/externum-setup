@@ -74,13 +74,6 @@ sudo -E .venv/bin/python main.py
 
 В Windows доступен только демонстрационный режим (реальные системные изменения не выполняются).
 
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python main.py
-```
-
 ## Интеграция с оригинальным install.sh
 
 GUI вызывает оригинальный скрипт `install.sh` в CLI-режиме со следующими аргументами:
@@ -124,7 +117,6 @@ python -m pytest tests -v
 ## Журнал и диагностический отчёт
 
 Логи сохраняются в:
-- Windows: `%LOCALAPPDATA%/externum/logs/`
 - Linux: `~/.local/state/externum/logs/`
 
 В диагностический отчёт TAR.GZ входят:
