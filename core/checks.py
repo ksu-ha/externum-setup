@@ -324,7 +324,6 @@ def run_preflight(iso_path="", usb_disk_path=""):
         check_network(),
         check_apt(),
         check_resources(),
-        check_iso(iso_path),
         check_usb_disk(usb_disk_path),
         check_docker(),
     ]

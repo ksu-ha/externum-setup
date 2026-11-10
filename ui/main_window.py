@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
 )
 
 from core.checks import run_preflight, readiness_summary
-from core.network import validate_network_form, interfaces
+from core.network import validate_network_form, interfaces, validate_ipv4
 from core.executor import InstallWorker
 from core.iso import ISOManager, ISOError
 from core.progress import ProgressState
