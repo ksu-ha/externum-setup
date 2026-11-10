@@ -1,4 +1,3 @@
-
 APP_STYLE = """
 * {
     font-family: "Segoe UI";
@@ -84,7 +83,14 @@ QFrame#notice {
     border: none;
 }
 
-QLabel#noticeTitle {
+/* Стили для карточки PRP */
+QFrame#prpCard {
+    background: #FAF9F5;
+    border: 1px solid #B8B3A8;
+    border-left: 4px solid #E96A2C; /* Оранжевая полоска слева */
+}
+
+QLabel#prpTitle {
     color: #E96A2C;
     font-family: Consolas;
     font-size: 10px;
@@ -135,10 +141,15 @@ QPushButton#secondary:hover {
     border-color: #E96A2C;
 }
 
+/* Кнопка ОТМЕНИТЬ (Оранжевая) */
 QPushButton#danger {
-    background: #A83225;
-    border-color: #A83225;
+    background: #E96A2C;
+    border-color: #E96A2C;
     color: white;
+}
+QPushButton#danger:hover {
+    background: #CC5725;
+    border-color: #CC5725;
 }
 
 QLineEdit, QComboBox {
@@ -219,5 +230,21 @@ QScrollBar::handle:vertical {
 QScrollBar::add-line:vertical,
 QScrollBar::sub-line:vertical {
     height: 0px;
+}
+
+QFrame#prpCard {
+    background: #FAF9F5;
+    border: 1px solid #B8B3A8;
+    border-left: 4px solid #E96A2C;
+}
+
+QPushButton#danger {
+    background: #E96A2C;
+    border-color: #E96A2C;
+    color: white;
+}
+QPushButton#danger:hover {
+    background: #CC5725;
+    border-color: #CC5725;
 }
 """

@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (
     QLabel, QPushButton, QStackedWidget, QFrame,
     QComboBox, QLineEdit, QFileDialog, QTextEdit,
     QScrollArea, QProgressBar, QDialog,
-    QGraphicsDropShadowEffect
+    QGraphicsDropShadowEffect, QGridLayout
 )
 
 from core.checks import run_preflight, readiness_summary
@@ -34,8 +34,9 @@ from ui.circular_progress import CircularProgress
 
 class ExternumDialog(QDialog):
     """
-    Универсальное кастомное окно:
-    info, warning, error, question, confirm.
+    Универсальное кастомное окно.
+    Убрана тень (из-за несовместимости), добавлена четкая рамка.
+    Скругления убраны (квадратные окна).
     """
 
     def __init__(
@@ -64,13 +65,6 @@ class ExternumDialog(QDialog):
 
         panel = QFrame()
         panel.setObjectName("dialogPanel")
-
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(30)
-        shadow.setOffset(0, 8)
-        shadow.setColor(QColor(20, 24, 30, 45))
-        panel.setGraphicsEffect(shadow)
-
         root.addWidget(panel)
 
         layout = QVBoxLayout(panel)
@@ -130,7 +124,6 @@ class ExternumDialog(QDialog):
             QFrame#dialogPanel {
                 background-color: #F7F7F5;
                 border: 1px solid #E3E3DF;
-                border-radius: 14px;
             }
 
             QLabel#dialogEyebrow {
@@ -166,7 +159,6 @@ class ExternumDialog(QDialog):
                 background-color: #E9E9E6;
                 color: #34373A;
                 border: 1px solid #D9D9D4;
-                border-radius: 7px;
                 padding: 12px 20px;
                 font-size: 11px;
                 font-weight: 800;
@@ -182,7 +174,6 @@ class ExternumDialog(QDialog):
                 background-color: #E66B32;
                 color: #FFFFFF;
                 border: 1px solid #E66B32;
-                border-radius: 7px;
                 padding: 12px 20px;
                 font-size: 11px;
                 font-weight: 800;
@@ -361,22 +352,23 @@ class MainWindow(QMainWindow):
     def build_footer(self):
         footer = QHBoxLayout()
 
-        self.footer_info = QLabel(
-            "ENGINEERING INSTALLER   /   ASTRA LINUX"
-        )
-        self.footer_info.setObjectName("eyebrow")
-
-        footer.addWidget(self.footer_info)
         footer.addStretch()
 
         self.back_btn = QPushButton("← НАЗАД")
         self.back_btn.setObjectName("secondary")
         self.back_btn.clicked.connect(self.go_back)
 
+        # Кнопка "В начало" (показывается на финальном экране)
+        self.restart_btn = QPushButton("В НАЧАЛО")
+        self.restart_btn.setObjectName("secondary")
+        self.restart_btn.clicked.connect(lambda: self.show_page(0))
+        self.restart_btn.hide()
+
         self.next_btn = QPushButton("ДАЛЕЕ →")
         self.next_btn.clicked.connect(self.go_next)
 
         footer.addWidget(self.back_btn)
+        footer.addWidget(self.restart_btn)
         footer.addWidget(self.next_btn)
 
         self.main_layout.addLayout(footer)
@@ -417,7 +409,7 @@ class MainWindow(QMainWindow):
 
         self.heading(
             layout,
-            "INSTALLATION SYSTEM / 01",
+            "",
             "Система\nразвёртывания.",
             "Графический мастер подготовки и установки комплекса "
             "Externum на Astra Linux."
@@ -501,7 +493,11 @@ class MainWindow(QMainWindow):
 
         layout.addStretch()
 
-        return page
+        # Оборачиваем в скролл, чтобы ничего не сжималось на маленьких экранах
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(page)
+        return scroll
 
     def select_usb_disk(self):
         path = QFileDialog.getExistingDirectory(
@@ -542,7 +538,7 @@ class MainWindow(QMainWindow):
             layout,
             "PRE-FLIGHT / SYSTEM DIAGNOSTICS",
             "Готовность системы",
-            "Контрольные зоны перед началом развёртывания."
+            "Восемь контрольных зон перед началом развёртывания."
         )
 
         top = QHBoxLayout()
@@ -593,12 +589,23 @@ class MainWindow(QMainWindow):
         return page
 
     def clear_checks(self):
+        # Полная очистка виджетов перед повторным рендером
         while self.check_layout.count():
             item = self.check_layout.takeAt(0)
             widget = item.widget()
-
             if widget:
                 widget.deleteLater()
+            elif item.layout():
+                self.clear_layout(item.layout())
+
+    def clear_layout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+            elif item.layout():
+                self.clear_layout(item.layout())
 
     def render_checks(self, results):
         self.clear_checks()
@@ -720,25 +727,11 @@ class MainWindow(QMainWindow):
             layout,
             "NETWORK / CONFIGURATION",
             "Сетевая конфигурация",
-            "Укажите параметры сети целевого узла. "
-            "Серые значения — примеры формата, а не настройки по умолчанию."
+            "Укажите параметры сети целевого узла."
         )
 
-        layout.addSpacing(15)
-
-        layout.addWidget(QLabel("СЕТЕВОЙ ИНТЕРФЕЙС"))
-
-        self.interface_combo = QComboBox()
+        # --- PRP card (видна всегда) ---
         found = interfaces()
-
-        if found:
-            self.interface_combo.addItems(found)
-        else:
-            self.interface_combo.addItem("eth0")
-
-        layout.addWidget(self.interface_combo)
-
-        # --- PRP card (появляется только при >= 2 интерфейсах) ---
 
         self.prp_card = QFrame()
         self.prp_card.setObjectName("prpCard")
@@ -750,9 +743,7 @@ class MainWindow(QMainWindow):
         prp_title.setObjectName("noticeTitle")
 
         self.prp_hint = QLabel(
-            "Обнаружено несколько интерфейсов. "
-            "Рекомендуется выделить отдельный PRP-интерфейс "
-            "для стабильной работы системы."
+            "Рекомендуется выделить отдельный интерфейс для PRP."
         )
         self.prp_hint.setObjectName("subheading")
         self.prp_hint.setWordWrap(True)
@@ -768,7 +759,7 @@ class MainWindow(QMainWindow):
         self.prp_enable_btn.clicked.connect(self.enable_prp)
         prp_row.addWidget(self.prp_enable_btn)
 
-        self.prp_skip_btn = QPushButton("БЕЗ PRP")
+        self.prp_skip_btn = QPushButton("ПРОДОЛЖИТЬ БЕЗ PRP")
         self.prp_skip_btn.setObjectName("secondary")
         self.prp_skip_btn.clicked.connect(self.skip_prp)
         prp_row.addWidget(self.prp_skip_btn)
@@ -784,36 +775,55 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.prp_card)
 
-        self.prp_card.setVisible(len(found) >= 2)
+        # --- Сетка для полей ---
+        grid = QGridLayout()
+        grid.setSpacing(15)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
 
-        # --- Основные поля ---
-
-        fields = [
-            ("IP-АДРЕС", "ip", "Например: 192.168.1.10"),
-            ("МАСКА CIDR", "cidr", "Например: 24"),
-            ("ШЛЮЗ", "gateway", "Например: 192.168.1.1"),
-            ("DNS", "dns", "Например: 8.8.8.8"),
-        ]
+        grid.addWidget(QLabel("СЕТЕВОЙ ИНТЕРФЕЙС"), 0, 0, 1, 2)
+        self.interface_combo = QComboBox()
+        if found:
+            self.interface_combo.addItems(found)
+        else:
+            self.interface_combo.addItem("eth0")
+        grid.addWidget(self.interface_combo, 1, 0, 1, 2)
 
         self.network_inputs = {}
+        self.network_errors = {}
 
-        for label, key, placeholder in fields:
-            layout.addWidget(QLabel(label))
-
+        def add_field(row, col, label_text, key, placeholder):
+            container = QVBoxLayout()
+            container.setSpacing(4)
+            container.addWidget(QLabel(label_text))
+            
             field = QLineEdit()
             field.setPlaceholderText(placeholder)
-
+            field.textChanged.connect(lambda _, k=key: self.clear_field_error(k))
             self.network_inputs[key] = field
-            layout.addWidget(field)
+            container.addWidget(field)
+            
+            err = QLabel("")
+            err.setStyleSheet("color: #B83225; font-size: 11px;")
+            err.hide()
+            self.network_errors[key] = err
+            container.addWidget(err)
+            
+            grid.addLayout(container, row, col)
 
-        self.network_error = QLabel("")
-        self.network_error.setStyleSheet("color: #B83225;")
-        self.network_error.setWordWrap(True)
+        add_field(2, 0, "IP-АДРЕС", "ip", "Например: 192.168.1.10")
+        add_field(2, 1, "МАСКА CIDR", "cidr", "Например: 24")
+        add_field(3, 0, "ШЛЮЗ", "gateway", "Например: 192.168.1.1")
+        add_field(3, 1, "DNS", "dns", "Например: 8.8.8.8")
 
-        layout.addWidget(self.network_error)
+        layout.addLayout(grid)
         layout.addStretch()
 
         return page
+
+    def clear_field_error(self, key):
+        if hasattr(self, "network_errors") and key in self.network_errors:
+            self.network_errors[key].hide()
 
     def enable_prp(self):
         if not self.state.usb_disk:
@@ -827,22 +837,22 @@ class MainWindow(QMainWindow):
         iface = self.prp_combo.currentText()
         ip = self.network_inputs["ip"].text().strip()
 
-        if platform.system() != "Linux":
-            self.state.prp_enabled = True
-            self.state.prp_interface = iface
-            self.prp_status.setText(
-                f"Демо-режим: PRP отмечен на {iface} "
-                f"({ip or 'без IP'})"
-            )
-            self.logger.info(f"PRP enabled (demo) on {iface}")
-            return
-
         if not ip:
             self.notify(
                 "IP не задан",
                 "Сначала укажите IP-адрес для PRP.",
                 "warning"
             )
+            return
+
+        if platform.system() != "Linux":
+            self.state.prp_enabled = True
+            self.state.prp_interface = iface
+            self.prp_status.setText(
+                f"Демо-режим: PRP отмечен на {iface} "
+                f"({ip})"
+            )
+            self.logger.info(f"PRP enabled (demo) on {iface}")
             return
 
         try:
@@ -909,12 +919,14 @@ class MainWindow(QMainWindow):
             "СМОНТИРОВАТЬ ISO (RO)"
         )
         self.mount_button.setObjectName("secondary")
+        self.mount_button.setEnabled(False)
         self.mount_button.clicked.connect(self.mount_iso)
 
         self.unmount_button = QPushButton(
             "РАЗМОНТИРОВАТЬ ISO"
         )
         self.unmount_button.setObjectName("secondary")
+        self.unmount_button.setEnabled(False)
         self.unmount_button.clicked.connect(self.unmount_iso)
 
         layout.addWidget(self.mount_button)
@@ -924,6 +936,7 @@ class MainWindow(QMainWindow):
             "ПОДКЛЮЧИТЬ ISO КАК РЕПОЗИТОРИЙ"
         )
         self.iso_repo_button.setObjectName("secondary")
+        self.iso_repo_button.setEnabled(False)
         self.iso_repo_button.clicked.connect(self.setup_iso_repo)
         layout.addWidget(self.iso_repo_button)
 
@@ -951,17 +964,23 @@ class MainWindow(QMainWindow):
             info = self.iso_manager.inspect(path)
 
             self.state.iso_path = info["path"]
-            self.iso_path_label.setText(info["name"])
+            self.iso_path_label.setText(f"ВЫБРАН: {info['name']}")
 
             size = info["size"] / (1024 ** 3)
 
             self.iso_info.setText(
                 f"ISO 9660 подтверждён. Размер: {size:.2f} ГБ."
             )
+            self.iso_info.setStyleSheet("color: #2E7D32;")
+
+            # Разблокируем кнопки
+            self.mount_button.setEnabled(True)
+            self.iso_repo_button.setEnabled(True)
 
             self.logger.info("ISO selected and inspected")
 
         except ISOError as exc:
+            self.iso_info.setStyleSheet("color: #B83225;")
             self.notify(
                 "Ошибка ISO",
                 str(exc),
@@ -985,6 +1004,9 @@ class MainWindow(QMainWindow):
             self.iso_info.setText(
                 f"Смонтировано только для чтения: {path}"
             )
+            
+            self.mount_button.setEnabled(False)
+            self.unmount_button.setEnabled(True)
 
             self.logger.info("ISO mounted read-only")
 
@@ -1004,6 +1026,10 @@ class MainWindow(QMainWindow):
             self.iso_info.setText("ISO размонтирован.")
             self.state.iso_repo_ready = False
             self.iso_repo_status.setText("")
+            
+            self.mount_button.setEnabled(True)
+            self.unmount_button.setEnabled(False)
+
             self.logger.info("ISO unmounted")
 
         except ISOError as exc:
@@ -1205,6 +1231,7 @@ class MainWindow(QMainWindow):
 
         self.back_btn.show()
         self.next_btn.show()
+        self.restart_btn.hide()
 
         self.back_btn.setEnabled(True)
         self.next_btn.setEnabled(True)
@@ -1229,6 +1256,7 @@ class MainWindow(QMainWindow):
 
         elif index == 6:
             self.next_btn.hide()
+            self.restart_btn.show()
 
         if index == 4:
             self.update_review()
@@ -1283,17 +1311,13 @@ class MainWindow(QMainWindow):
     def go_next(self):
         page = self.current_page
 
-        # Экран выполнения: перейти к результату можно
-        # только после завершения операции.
         if page == 5:
             finished = (
                 self.worker_success
                 or self.worker_exit_code is not None
             )
-
             if finished:
                 self.show_page(6)
-
             return
 
         if page == 6:
@@ -1307,7 +1331,6 @@ class MainWindow(QMainWindow):
             else "distributed"
         )
 
-        # Диагностика должна быть запущена.
         if page == 1:
             if not self.check_results:
                 self.notify(
@@ -1317,42 +1340,41 @@ class MainWindow(QMainWindow):
                 )
                 return
 
-        # Проверка сети для реальной установки.
+        # Валидация сети (работает и в демо)
         if page == 2:
-            if self.state.run_mode == "Реальная установка":
-                data = {
-                    key: field.text().strip()
-                    for key, field in self.network_inputs.items()
-                }
+            data = {
+                key: field.text().strip()
+                for key, field in self.network_inputs.items()
+            }
+            data["interface"] = self.interface_combo.currentText()
 
-                data["interface"] = self.interface_combo.currentText()
+            errors = validate_network_form(data)
 
-                errors = validate_network_form(data)
+            for err_label in self.network_errors.values():
+                err_label.hide()
 
-                if errors:
-                    self.network_error.setText(
-                        "\n".join(
-                            f"{key}: {value}"
-                            for key, value in errors.items()
-                        )
-                    )
-
+            if errors:
+                for key, msg in errors.items():
+                    if key in self.network_errors:
+                        self.network_errors[key].setText(msg)
+                        self.network_errors[key].show()
+                
+                if self.state.run_mode == "Реальная установка":
                     self.notify(
                         "Проверьте сеть",
-                        "\n".join(
-                            f"{key}: {value}"
-                            for key, value in errors.items()
-                        ),
+                        "Исправьте ошибки в полях перед продолжением.",
                         "warning"
                     )
                     return
+                else:
+                    self.notify(
+                        "Демо-режим",
+                        "Поля содержат ошибки, но переход разрешён.",
+                        "warning"
+                    )
 
-                self.network_error.clear()
-                self.state.network = data
-            else:
-                self.network_error.clear()
+            self.state.network = data
 
-        # Проверка ISO и usb-disk для реальной установки.
         if page == 3:
             if self.state.run_mode == "Реальная установка":
                 if platform.system() != "Linux":
@@ -1379,7 +1401,6 @@ class MainWindow(QMainWindow):
                     )
                     return
 
-        # Подготовка config.yml и inventory.yml + подтверждение.
         if page == 4:
             if self.state.usb_disk:
                 try:
