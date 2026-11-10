@@ -123,7 +123,7 @@ class ExternumDialog(QDialog):
         self.setStyleSheet("""
             QFrame#dialogPanel {
                 background-color: #F7F7F5;
-                border: 1px solid #E3E3DF;
+                border: 1px solid #EFEFEF;
             }
 
             QLabel#dialogEyebrow {
